@@ -1,1 +1,807 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistema de Extracción Automática de Atributos Geomorfológicos Fluviales</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js para el perfil longitudinal interactivo -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- GeoTIFF.js oficial -->
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+  <!-- Fuente Inter para legibilidad técnica en proyector -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    .tab-active {
+      border-bottom: 2px solid #1d4ed8;
+      color: #1d4ed8;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
 
+  <!-- ENCABEZADO INSTITUCIONAL / TÉCNICO -->
+  <header class="bg-blue-900 text-white border-b border-blue-800 shadow-sm">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <span class="text-xs uppercase tracking-widest text-blue-200 font-semibold block">
+          Experimentación en Hidráulica Fluvial y Calidad del Agua
+        </span>
+        <h1 class="text-xl md:text-2xl font-bold tracking-tight mt-0.5">
+          Extracción Automática de Atributos Geomorfológicos de Ríos
+        </h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="bg-blue-800/80 border border-blue-700 px-3.5 py-1.5 rounded text-xs">
+          <span class="text-blue-200 block">Resolución Espacial Base</span>
+          <span id="header-res" class="font-semibold text-white text-sm">0.1444 m/píxel</span>
+        </div>
+        <div class="bg-blue-800/80 border border-blue-700 px-3.5 py-1.5 rounded text-xs">
+          <span class="text-blue-200 block">Dimensiones Raster</span>
+          <span class="font-semibold text-white text-sm">5376 x 7295 px</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="max-w-7xl mx-auto w-full px-6 py-6 flex-1 space-y-6">
+
+    <!-- BARRA DE CONTROL Y CONEXIÓN AL MOTOR PYTHON (RENDER) -->
+    <section class="bg-white border border-slate-200 rounded-lg shadow-sm p-5">
+      <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div class="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Endpoint de Render -->
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              Servidor Backend (API Render)
+            </label>
+            <input 
+              type="text" 
+              id="api-url" 
+              value="https://rios-px6m.onrender.com/analyze" 
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded focus:outline-none focus:border-blue-600 text-slate-700 bg-slate-50"
+            />
+          </div>
+          <!-- Selector de Archivo -->
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              Ortomosaico / Imagen Satelital (GeoTIFF, JPG, PNG)
+            </label>
+            <input 
+              type="file" 
+              id="file-input" 
+              accept=".tif,.tiff,.jpg,.jpeg,.png"
+              class="w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded py-1 px-2"
+            />
+          </div>
+          <!-- Resolución Espacial -->
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              Escala Espacial (metros / píxel)
+            </label>
+            <input 
+              type="number" 
+              id="input-res" 
+              step="0.0001" 
+              value="0.1444" 
+              class="w-full px-3 py-2 text-sm border border-slate-300 rounded focus:outline-none focus:border-blue-600 text-slate-700"
+            />
+          </div>
+        </div>
+
+        <!-- Botones de Acción -->
+        <div class="flex items-center gap-3">
+          <button 
+            onclick="cargarCasoEstudio()" 
+            class="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 transition">
+            Restaurar Caso Base
+          </button>
+          <button 
+            onclick="procesarConRender()" 
+            id="btn-analyze"
+            class="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-blue-700 rounded hover:bg-blue-800 transition shadow-sm">
+            Ejecutar Motor RGB
+          </button>
+        </div>
+      </div>
+      <!-- Barra de estado -->
+      <div id="status-bar" class="hidden mt-3 pt-3 border-t border-slate-100 text-xs text-blue-800 font-medium">
+        Procesando matriz espectral y topológica en el servidor...
+      </div>
+    </section>
+
+    <!-- TARJETAS DE INDICADORES GEOMORFOLÓGICOS PRINCIPALES (KPIs) -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- KPI 1: Sinuosidad y Curvatura -->
+      <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm border-l-4 border-l-blue-700">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Índice de Sinuosidad (S)
+        </span>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span id="kpi-sin-izq" class="text-2xl font-bold text-slate-900">1.367</span>
+          <span class="text-xs text-slate-500">/ Brazo Der: <strong id="kpi-sin-der" class="text-slate-700">1.424</strong></span>
+        </div>
+        <div class="mt-1 flex items-center justify-between">
+          <p id="kpi-sin-clase" class="text-xs font-medium text-blue-700 bg-blue-50 inline-block px-2 py-0.5 rounded">
+            Moderadamente Meándrico
+          </p>
+          <span class="text-xs text-slate-500">Rc/W: <strong id="kpi-rcw" class="text-slate-700">7.42</strong></span>
+        </div>
+      </div>
+
+      <!-- KPI 2: Ancho Efectivo y Banca Llena -->
+      <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm border-l-4 border-l-blue-600">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Ancho Efectivo y Banca Llena
+        </span>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span id="kpi-ancho-med" class="text-2xl font-bold text-slate-900">1.92 m</span>
+          <span id="kpi-ancho-std" class="text-xs text-slate-500">(±1.00 m)</span>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Rango: <span id="kpi-ancho-min" class="font-medium text-slate-700">0.63 m</span> - <span id="kpi-ancho-max" class="font-medium text-slate-700">5.24 m</span> | W<sub>bkf</sub>: <strong id="kpi-wbkf" class="text-blue-700">3.68 m</strong>
+        </p>
+      </div>
+
+      <!-- KPI 3: Unidades Hidromorfológicas -->
+      <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm border-l-4 border-l-blue-500">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Unidades Hidromorfológicas
+        </span>
+        <div class="mt-2 flex items-baseline gap-4">
+          <div>
+            <span id="kpi-piscinas" class="text-2xl font-bold text-slate-900">22</span>
+            <span class="text-xs text-slate-500 block">Piscinas (Pozas)</span>
+          </div>
+          <div class="border-l border-slate-200 pl-4">
+            <span id="kpi-rapidos" class="text-2xl font-bold text-slate-900">41</span>
+            <span class="text-xs text-slate-500 block">Rápidos (Riffles)</span>
+          </div>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Relación P/R: <strong id="kpi-pr" class="text-blue-700">0.54</strong> | Pendiente S<sub>0</sub>: <strong id="kpi-pendiente" class="text-slate-700">1.10%</strong>
+        </p>
+      </div>
+
+      <!-- KPI 4: Delimitación Superficial y Dosel -->
+      <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm border-l-4 border-l-blue-400">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Superficie Hídrica y Oclusión
+        </span>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span id="kpi-area-cauce" class="text-2xl font-bold text-slate-900">2185.5 m²</span>
+          <span class="text-xs text-slate-500">Cauce Lótico</span>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Estanque: <strong id="kpi-area-estanque" class="text-slate-700">3706.4 m²</strong> | Oclusión: <strong id="kpi-oclusion" class="text-blue-700">58.4%</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- PANEL CENTRAL: VISOR CARTOGRÁFICO Y PERFIL LONGITUDINAL -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- Columna Izquierda (5 cols): Mapa Geomorfológico -->
+      <div class="lg:col-span-5 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col">
+        <div class="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">
+            Cartografía Digital de Unidades Fluviales
+          </h2>
+          <div class="flex gap-1 bg-slate-100 p-1 rounded text-xs">
+            <button onclick="cambiarVistaImagen('procesada')" id="btn-img-proc" class="px-2.5 py-1 rounded bg-white text-blue-700 font-semibold shadow-sm">
+              Modelo Extraído
+            </button>
+            <button onclick="cambiarVistaImagen('original')" id="btn-img-orig" class="px-2.5 py-1 rounded text-slate-600 hover:text-slate-900">
+              Ortofoto Base
+            </button>
+          </div>
+        </div>
+
+        <div class="p-4 flex-1 flex flex-col items-center justify-center bg-slate-50 relative min-h-[520px]">
+          <img 
+            id="result-image" 
+            src="Mapa_Geomorfologico_Ortofoto.jpg" 
+            alt="Mapa Geomorfológico del Cauce"
+            class="max-h-[620px] w-auto object-contain rounded border border-slate-200 shadow-sm bg-white text-xs text-slate-400 p-2 text-center"
+          />
+        </div>
+
+        <!-- Leyenda Técnica -->
+        <div class="px-5 py-3 bg-white border-t border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-600">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-sky-500 inline-block"></span>
+            <span>Lámina Cauce</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-orange-500 inline-block"></span>
+            <span>Estanque Léntico</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-fuchsia-600 inline-block"></span>
+            <span>Piscinas (Pozas)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-red-600 inline-block"></span>
+            <span>Rápidos (Riffles)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-yellow-400 border border-slate-400 inline-block"></span>
+            <span>Barras Sedimento</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-lime-400 inline-block"></span>
+            <span>Isla Bifurcación</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-sm bg-emerald-600 inline-block"></span>
+            <span>Dosel Ribereño</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-cyan-400 border border-slate-500 inline-block"></span>
+            <span>2 &le; Rc/W &le; 3</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Columna Derecha (7 cols): Gráfica Interactiva + Tabla Completa de 15 Variables -->
+      <div class="lg:col-span-7 flex flex-col gap-6">
+
+        <!-- Gráfico del Perfil Longitudinal de Anchos -->
+        <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">
+                Variación Longitudinal del Ancho Efectivo y Banca Llena
+              </h2>
+              <p class="text-xs text-slate-500">
+                Muestreo continuo mediante Transformada de Distancia Euclídea (progresiva aguas abajo)
+              </p>
+            </div>
+          </div>
+          <div class="h-[260px] w-full">
+            <canvas id="widthChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Tabla Completa de las 15 Variables Geomorfológicas e Hidráulicas -->
+        <div class="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex-1">
+          <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">
+              Reporte Completo de Atributos Geomorfológicos e Hidráulicos (15 Variables)
+            </h2>
+            <span class="text-xs font-medium text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
+              Extracción 100% Automática
+            </span>
+          </div>
+          <div class="overflow-x-auto max-h-[380px] overflow-y-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="sticky top-0 bg-slate-100 border-b border-slate-200 text-slate-600 uppercase z-10">
+                <tr>
+                  <th class="py-2.5 px-4 font-semibold w-5/12">Variable Geomorfológica / Hidráulica</th>
+                  <th class="py-2.5 px-4 font-semibold w-7/12">Resultado Obtenido y Caracterización</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 text-slate-700">
+                <tr>
+                  <td class="py-2 px-4 font-medium">1. Geometría en Planta y Sinuosidad (S)</td>
+                  <td id="row-sinuosidad" class="py-2 px-4 font-semibold text-blue-900">
+                    Izq: L = 1271.41 m (S = 1.367) | Der: L = 1283.11 m (S = 1.424 - Moderadamente Meándrico)
+                  </td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">2. Ancho Promedio del Cauce (W)</td>
+                  <td id="row-ancho-med" class="py-2 px-4">1.92 m (±1.00 m)</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">3. Ancho Máximo del Cauce (W<sub>máx</sub>)</td>
+                  <td id="row-ancho-max" class="py-2 px-4 font-semibold text-blue-800">5.24 m</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">4. Ancho Mínimo del Cauce (W<sub>mín</sub>)</td>
+                  <td id="row-ancho-min" class="py-2 px-4 font-semibold text-blue-800">0.63 m</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">5. Conteo de Piscinas (Pools) y Rápidos (Riffles)</td>
+                  <td id="row-unidades" class="py-2 px-4 font-semibold text-slate-900">22 Piscinas (Pozas) | 41 Rápidos (Riffles)</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">6. Radio de Curvatura (R<sub>c</sub>) y Longitud de Onda de Meandro (L<sub>m</sub>)</td>
+                  <td id="row-curvatura" class="py-2 px-4">R<sub>c</sub> mediano = 14.25 m (mín = 4.60 m) | L<sub>m</sub> = 43.80 m</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">7. Relación R<sub>c</sub> / W (Indicador de Erosión de Márgenes)</td>
+                  <td id="row-rcw" class="py-2 px-4">R<sub>c</sub>/W = 7.42 &rarr; Estable global (14.8% del tramo en rango crítico 2.0 &le; R<sub>c</sub>/W &le; 3.0)</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">8. Índice de Trenzamiento (Braiding Index) y Canales Activos</td>
+                  <td id="row-trenzamiento" class="py-2 px-4">BI = 1.38 | Canales activos: 1 (tramo superior) &rarr; 2 canales (bifurcación inferior en 38.2% del tramo)</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">9. Área y Proporción de Barras de Sedimento e Islas</td>
+                  <td id="row-barras-islas" class="py-2 px-4">Barras expuestas: 412.6 m² (15.9% del lecho) | Isla fluvial central: 14820.5 m² (87.2% del complejo)</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">10. Distinción de Cuerpos Lénticos vs. Lóticos</td>
+                  <td id="row-lentico-lotico" class="py-2 px-4">Léntico (Estanque): 3706.4 m² (62.9%) | Lótico (Cauce del río): 2185.5 m² (37.1%)</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">11. Cobertura del Dosel Ribereño y Grado de Oclusión</td>
+                  <td id="row-dosel-oclusion" class="py-2 px-4">Dosel ribereño (buffer 10 m): 64.2% | Grado de oclusión del cauce por copas: 58.4%</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">12. Cobertura Vegetal Total</td>
+                  <td id="row-vegetacion" class="py-2 px-4">78.6% de la superficie válida del ortomosaico (43.15 ha)</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">13. Relación de Espaciamiento y Conteo Piscina-Rápido</td>
+                  <td id="row-espaciamiento" class="py-2 px-4">Relación P/R = 0.54 | Espaciamiento Piscinas: 80.5 m (41.9 &times; W) | Rápidos: 43.2 m</td>
+                </tr>
+                <tr class="bg-slate-50/60">
+                  <td class="py-2 px-4 font-medium">14. Pendiente Longitudinal del Tramo (S<sub>0</sub>)</td>
+                  <td id="row-pendiente" class="py-2 px-4">0.0110 m/m (1.10% - Morfología Pool-Riffle de piedemonte)</td>
+                </tr>
+                <tr>
+                  <td class="py-2 px-4 font-medium">15. Ancho de Banca Llena (Bankfull Width) y Confinamiento</td>
+                  <td id="row-bankfull" class="py-2 px-4 font-semibold text-blue-900">W<sub>bkf</sub> = 3.68 m | IC = 2.95 (Moderadamente Confinado, faja aluvial = 10.85 m)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECCIÓN DE EXPOSICIÓN: METODOLOGÍA, ALCANCES Y LIMITACIONES (REQUISITO DEL RETO) -->
+    <section class="bg-white border border-slate-200 rounded-lg shadow-sm p-6">
+      <h2 class="text-sm font-bold uppercase tracking-wider text-blue-900 border-b border-slate-200 pb-3 mb-4">
+        Fundamento Metodológico, Alcances y Limitaciones del Algoritmo
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs leading-relaxed text-slate-600">
+        
+        <!-- Columna 1: Método Empleado -->
+        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+          <h3 class="font-bold text-slate-800 uppercase tracking-wide mb-2 text-blue-800">
+            1. Arquitectura del Método (Pipeline RGB)
+          </h3>
+          <ul class="space-y-1.5 list-disc list-inside">
+            <li><strong>Enmascaramiento de Transparencia:</strong> Erosión morfológica sobre la banda Alpha para descartar bordes de recorte (32.72% NoData).</li>
+            <li><strong>Filtrado Espectral Sin NIR:</strong> Uso del Índice de Exceso de Verde (ExG = 2G - R - B) y diferencia cromática (G - B) junto con el espacio HSV para suprimir sombras arbóreas y aislar agua oscura y espuma de rápidos.</li>
+            <li><strong>Separación Lótico vs. Léntico:</strong> Discriminación automática del estanque inferior (3706.4 m²) mediante varianza local de textura y cercanía topológica.</li>
+            <li><strong>Reconstrucción Topológica (Dijkstra):</strong> Trazado del eje central continuo bajo oclusiones de bosque de galería mediante superficie de costo mínimo y derivadas espaciales para curvatura (R<sub>c</sub> y L<sub>m</sub>).</li>
+          </ul>
+        </div>
+
+        <!-- Columna 2: Alcances -->
+        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+          <h3 class="font-bold text-slate-800 uppercase tracking-wide mb-2 text-blue-800">
+            2. Alcances y Generalización
+          </h3>
+          <ul class="space-y-1.5 list-disc list-inside">
+            <li><strong>Operación Autónoma:</strong> Extracción de punta a punta de 15 variables hidromorfológicas sin digitalización manual de semillas ni edición de umbrales.</li>
+            <li><strong>Invarianza a Infraestructura Vial:</strong> Rechazo automático de carreteras asfaltadas, caminos afirmados y cubiertas de edificaciones grises con reflectancia similar al lecho fluvial.</li>
+            <li><strong>Continuidad Hidráulica y Multicanalidad:</strong> Capacidad de resolver cauces simples, meándricos, bifurcados (anastomosados) y trenzados cuantificando barras, islas y oclusión ribereña.</li>
+            <li><strong>Escalabilidad Multi-Sensor:</strong> Compatible con ortomosaicos de dron (GeoTIFF de alta resolución) e imágenes satelitales RGB estándar.</li>
+          </ul>
+        </div>
+
+        <!-- Columna 3: Limitaciones -->
+        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+          <h3 class="font-bold text-slate-800 uppercase tracking-wide mb-2 text-blue-800">
+            3. Limitaciones Identificadas
+          </h3>
+          <ul class="space-y-1.5 list-disc list-inside">
+            <li><strong>Ausencia de Banda Infrarroja Cercana (NIR):</strong> Al operar exclusivamente en el espectro visible (RGB), la separación entre agua somera con fondo de limo/algas y sombras topográficas depende de la textura local.</li>
+            <li><strong>Oclusión Total de Dosel:</strong> En tramos donde el bosque de galería cubre el 100% del cauce (58.4% de oclusión en este tramo), el ancho efectivo se estima por interpolación longitudinal entre las ventanas visibles adyacentes.</li>
+            <li><strong>Batimetría y Pendiente Óptica:</strong> Sin LiDAR/DEM acoplado, la identificación de piscinas y pendiente longitudinal se fundamenta en atenuación radiométrica y leyes geomorfológicas empíricas (Leopold &amp; Wolman).</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- PIE DE PÁGINA -->
+  <footer class="bg-white border-t border-slate-200 mt-8 py-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-2">
+      <span>Motor de Procesamiento Hidromorfológico en Python (OpenCV, Scikit-Image, Rasterio, FastAPI)</span>
+      <span>Despliegue Cloud: GitHub Pages (Frontend) + Render (Backend API)</span>
+    </div>
+  </footer>
+
+  <!-- LÓGICA DE INTERFAZ Y GRÁFICOS -->
+  <script>
+    let chartInstance = null;
+    let imagenProcesadaActual = "Mapa_Geomorfologico_Ortofoto.jpg";
+    let imagenOriginalActual = "ortofoto_original.jpg";
+
+    // Datos precargados del caso de prueba con las 15 variables completas (Ortomosaico 0.1444 m/px)
+    const CASO_BASE = {
+      res_m_px: 0.1444,
+      cauce_izq: { l_cauce: 1271.41, l_valle: 930.31, sinuosidad: 1.367 },
+      cauce_der: { l_cauce: 1283.11, l_valle: 900.75, sinuosidad: 1.424 },
+      ancho: {
+        promedio: 1.92,
+        std: 1.00,
+        min: 0.63,
+        max: 5.24,
+        bankfull: 3.68,
+        faja_aluvial: 10.85,
+        indice_confinamiento: 2.95,
+        clase_confinamiento: "Moderadamente Confinado"
+      },
+      curvatura: {
+        rc_med: 14.25,
+        rc_min: 4.60,
+        lm_meandro: 43.80,
+        rc_w_ratio: 7.42,
+        pct_erosion_crit: 14.8
+      },
+      trenzamiento: {
+        braiding_index: 1.38,
+        canales_max: 2,
+        pct_bifurcado: 38.2
+      },
+      unidades: {
+        piscinas: 22,
+        rapidos: 41,
+        relacion_pr: 0.54,
+        espaciamiento_piscinas_m: 80.50,
+        espaciamiento_rapidos_m: 43.20,
+        espaciamiento_rel_w: 41.9,
+        pendiente_m_m: 0.0110,
+        pendiente_pct: 1.10
+      },
+      areas: {
+        cauce_m2: 2185.5,
+        estanque_m2: 3706.4,
+        pct_lotico: 37.1,
+        pct_lentico: 62.9,
+        barras_m2: 412.6,
+        prop_barras_pct: 15.9,
+        isla_m2: 14820.5,
+        prop_isla_pct: 87.2
+      },
+      vegetacion: {
+        cobertura_total_pct: 78.6,
+        area_veg_ha: 43.15,
+        dosel_ripario_pct: 64.2,
+        grado_oclusion_pct: 58.4
+      },
+      perfil_izq: {
+        dist: [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 1050, 1100, 1150, 1200, 1271],
+        width: [0.85, 4.45, 3.32, 3.40, 2.15, 3.98, 2.20, 1.10, 2.85, 1.35, 1.95, 2.80, 4.55, 3.40, 2.65, 1.45, 1.15, 0.90, 0.75, 0.80, 1.65, 2.40, 1.25, 3.30, 1.85, 1.60]
+      },
+      perfil_der: {
+        dist: [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000, 1050, 1100, 1150, 1200, 1283],
+        width: [0.85, 4.45, 3.32, 3.40, 2.15, 3.98, 2.20, 1.10, 2.85, 1.35, 1.95, 2.80, 4.55, 3.10, 2.10, 1.80, 2.55, 1.60, 2.95, 1.75, 2.60, 1.50, 2.20, 4.75, 2.30, 3.10]
+      }
+    };
+
+    function clasificarSinuosidad(s) {
+      if (s < 1.05) return "Cauce Recto";
+      if (s < 1.30) return "Cauce Sinuoso";
+      if (s < 1.50) return "Moderadamente Meándrico";
+      return "Cauce Meándrico";
+    }
+
+    function renderizarDatos(data) {
+      const claseSin = clasificarSinuosidad(data.cauce_der.sinuosidad);
+
+      // Encabezado y KPIs Superiores
+      document.getElementById("header-res").textContent = `${data.res_m_px} m/píxel`;
+      document.getElementById("kpi-sin-izq").textContent = data.cauce_izq.sinuosidad.toFixed(3);
+      document.getElementById("kpi-sin-der").textContent = data.cauce_der.sinuosidad.toFixed(3);
+      document.getElementById("kpi-sin-clase").textContent = claseSin;
+      document.getElementById("kpi-rcw").textContent = data.curvatura.rc_w_ratio.toFixed(2);
+
+      document.getElementById("kpi-ancho-med").textContent = `${data.ancho.promedio.toFixed(2)} m`;
+      document.getElementById("kpi-ancho-std").textContent = `(±${data.ancho.std.toFixed(2)} m)`;
+      document.getElementById("kpi-ancho-min").textContent = `${data.ancho.min.toFixed(2)} m`;
+      document.getElementById("kpi-ancho-max").textContent = `${data.ancho.max.toFixed(2)} m`;
+      document.getElementById("kpi-wbkf").textContent = `${data.ancho.bankfull.toFixed(2)} m`;
+
+      document.getElementById("kpi-piscinas").textContent = data.unidades.piscinas;
+      document.getElementById("kpi-rapidos").textContent = data.unidades.rapidos;
+      document.getElementById("kpi-pr").textContent = data.unidades.relacion_pr.toFixed(2);
+      document.getElementById("kpi-pendiente").textContent = `${data.unidades.pendiente_pct.toFixed(2)}%`;
+
+      document.getElementById("kpi-area-cauce").textContent = `${data.areas.cauce_m2.toFixed(1)} m²`;
+      document.getElementById("kpi-area-estanque").textContent = `${data.areas.estanque_m2.toFixed(1)} m²`;
+      document.getElementById("kpi-oclusion").textContent = `${data.vegetacion.grado_oclusion_pct.toFixed(1)}%`;
+
+      // Tabla de 15 Variables
+      document.getElementById("row-sinuosidad").textContent =
+        `Izq: L = ${data.cauce_izq.l_cauce.toFixed(2)} m (S = ${data.cauce_izq.sinuosidad.toFixed(3)}) | Der: L = ${data.cauce_der.l_cauce.toFixed(2)} m (S = ${data.cauce_der.sinuosidad.toFixed(3)} - ${claseSin})`;
+      document.getElementById("row-ancho-med").textContent =
+        `${data.ancho.promedio.toFixed(2)} m (±${data.ancho.std.toFixed(2)} m)`;
+      document.getElementById("row-ancho-max").textContent =
+        `${data.ancho.max.toFixed(2)} m`;
+      document.getElementById("row-ancho-min").textContent =
+        `${data.ancho.min.toFixed(2)} m`;
+      document.getElementById("row-unidades").textContent =
+        `${data.unidades.piscinas} Piscinas (Pozas) | ${data.unidades.rapidos} Rápidos (Riffles)`;
+      document.getElementById("row-curvatura").textContent =
+        `Rc mediano = ${data.curvatura.rc_med.toFixed(2)} m (mín = ${data.curvatura.rc_min.toFixed(2)} m) | Lm = ${data.curvatura.lm_meandro.toFixed(2)} m`;
+
+      const estadoErosion = (data.curvatura.rc_w_ratio >= 2.0 && data.curvatura.rc_w_ratio <= 3.0)
+        ? "CRÍTICO (Máxima erosión en márgenes)"
+        : `Estable global (${data.curvatura.pct_erosion_crit.toFixed(1)}% del tramo en rango crítico 2.0 ≤ Rc/W ≤ 3.0)`;
+      document.getElementById("row-rcw").textContent =
+        `Rc/W = ${data.curvatura.rc_w_ratio.toFixed(2)} → ${estadoErosion}`;
+
+      document.getElementById("row-trenzamiento").textContent =
+        `BI = ${data.trenzamiento.braiding_index.toFixed(2)} | Canales activos: 1 (tramo superior) → ${data.trenzamiento.canales_max} canales (bifurcación en ${data.trenzamiento.pct_bifurcado.toFixed(1)}% del tramo)`;
+      document.getElementById("row-barras-islas").textContent =
+        `Barras expuestas: ${data.areas.barras_m2.toFixed(1)} m² (${data.areas.prop_barras_pct.toFixed(1)}% del lecho) | Isla fluvial central: ${data.areas.isla_m2.toFixed(1)} m² (${data.areas.prop_isla_pct.toFixed(1)}% del complejo)`;
+      document.getElementById("row-lentico-lotico").textContent =
+        `Léntico (Estanque): ${data.areas.estanque_m2.toFixed(1)} m² (${data.areas.pct_lentico.toFixed(1)}%) | Lótico (Cauce del río): ${data.areas.cauce_m2.toFixed(1)} m² (${data.areas.pct_lotico.toFixed(1)}%)`;
+      document.getElementById("row-dosel-oclusion").textContent =
+        `Dosel ribereño (buffer 10 m): ${data.vegetacion.dosel_ripario_pct.toFixed(1)}% | Grado de oclusión del cauce por copas: ${data.vegetacion.grado_oclusion_pct.toFixed(1)}%`;
+      document.getElementById("row-vegetacion").textContent =
+        `${data.vegetacion.cobertura_total_pct.toFixed(1)}% de la superficie válida del ortomosaico (${data.vegetacion.area_veg_ha.toFixed(2)} ha)`;
+      document.getElementById("row-espaciamiento").textContent =
+        `Relación P/R = ${data.unidades.relacion_pr.toFixed(2)} | Espaciamiento Piscinas: ${data.unidades.espaciamiento_piscinas_m.toFixed(1)} m (${data.unidades.espaciamiento_rel_w.toFixed(1)} × W) | Rápidos: ${data.unidades.espaciamiento_rapidos_m.toFixed(1)} m`;
+      document.getElementById("row-pendiente").textContent =
+        `${data.unidades.pendiente_m_m.toFixed(4)} m/m (${data.unidades.pendiente_pct.toFixed(2)}% - Morfología Pool-Riffle de piedemonte)`;
+      document.getElementById("row-bankfull").textContent =
+        `W_bkf = ${data.ancho.bankfull.toFixed(2)} m | IC = ${data.ancho.indice_confinamiento.toFixed(2)} (${data.ancho.clase_confinamiento}, faja aluvial = ${data.ancho.faja_aluvial.toFixed(2)} m)`;
+
+      if (data.image_base64) {
+        imagenProcesadaActual = data.image_base64;
+        document.getElementById("result-image").src = imagenProcesadaActual;
+      }
+
+      actualizarGrafico(data.perfil_izq, data.perfil_der, data.ancho.promedio, data.ancho.bankfull);
+    }
+
+    function actualizarGrafico(perfilIzq, perfilDer, promedio, bankfull) {
+      const ctx = document.getElementById("widthChart").getContext("2d");
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      const lineaMedia = perfilIzq.dist.map(() => promedio);
+      const lineaBankfull = perfilIzq.dist.map(() => bankfull);
+
+      chartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: perfilIzq.dist,
+          datasets: [
+            {
+              label: "Ancho Efectivo - Cauce Izquierdo (m)",
+              data: perfilIzq.width,
+              borderColor: "#1d4ed8",
+              backgroundColor: "rgba(29, 78, 216, 0.12)",
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.3
+            },
+            {
+              label: "Ancho Efectivo - Brazo Derecho (m)",
+              data: perfilDer.width,
+              borderColor: "#0284c7",
+              borderDash: [5, 5],
+              borderWidth: 1.6,
+              pointRadius: 0,
+              fill: false,
+              tension: 0.3
+            },
+            {
+              label: `Ancho Medio (${promedio.toFixed(2)} m)`,
+              data: lineaMedia,
+              borderColor: "#dc2626",
+              borderDash: [3, 3],
+              borderWidth: 1.5,
+              pointRadius: 0,
+              fill: false
+            },
+            {
+              label: `Banca Llena W_bkf (${bankfull.toFixed(2)} m)`,
+              data: lineaBankfull,
+              borderColor: "#7c3aed",
+              borderDash: [8, 4],
+              borderWidth: 1.6,
+              pointRadius: 0,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: {
+              position: "top",
+              labels: { font: { family: "Inter", size: 10.5 }, boxWidth: 12 }
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: "Progresiva longitudinal aguas abajo (metros)", font: { size: 11, weight: "600" } },
+              ticks: { maxTicksLimit: 10, font: { size: 10 } }
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: "Ancho de lámina de agua (m)", font: { size: 11, weight: "600" } },
+              ticks: { font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+
+    function cambiarVistaImagen(tipo) {
+      const imgEl = document.getElementById("result-image");
+      const btnProc = document.getElementById("btn-img-proc");
+      const btnOrig = document.getElementById("btn-img-orig");
+
+      if (tipo === "procesada") {
+        imgEl.src = imagenProcesadaActual;
+        btnProc.className = "px-2.5 py-1 rounded bg-white text-blue-700 font-semibold shadow-sm";
+        btnOrig.className = "px-2.5 py-1 rounded text-slate-600 hover:text-slate-900";
+      } else {
+        imgEl.src = imagenOriginalActual;
+        btnOrig.className = "px-2.5 py-1 rounded bg-white text-blue-700 font-semibold shadow-sm";
+        btnProc.className = "px-2.5 py-1 rounded text-slate-600 hover:text-slate-900";
+      }
+    }
+
+    function cargarCasoEstudio() {
+      imagenProcesadaActual = "Mapa_Geomorfologico_Ortofoto.jpg";
+      document.getElementById("result-image").src = imagenProcesadaActual;
+      renderizarDatos(CASO_BASE);
+    }
+
+    // Lee el GeoTIFF en el navegador preservando prioritariamente los píxeles de agua del cauce
+    // y envía una matriz ligera (1824x1344) que consume < 130 MB de RAM en Render
+    async function prepararArchivoParaRender(file, resOriginal, statusBar) {
+      const name = file.name.toLowerCase();
+      if (!name.endsWith(".tif") && !name.endsWith(".tiff")) {
+        return { blob: file, filename: file.name, resAjustada: resOriginal };
+      }
+
+      statusBar.textContent = "Extrayendo bandas del GeoTIFF con preservación de cauce en alta resolución...";
+      const arrayBuffer = await file.arrayBuffer();
+      const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+      const image = await tiff.getImage();
+
+      const origW = image.getWidth();
+      const origH = image.getHeight();
+
+      const readScale = Math.max(origW, origH) > 3800 ? 2.0 : 1.0;
+      const readW = Math.round(origW / readScale);
+      const readH = Math.round(origH / readScale);
+
+      const rasters = await image.readRasters({
+        width: readW,
+        height: readH,
+        resampleMethod: "nearest"
+      });
+
+      const rBand = rasters[0];
+      const gBand = rasters.length > 1 ? rasters[1] : rasters[0];
+      const bBand = rasters.length > 2 ? rasters[2] : rasters[0];
+      const aBand = rasters.length > 3 ? rasters[3] : null;
+
+      const targetW = Math.floor(readW / 2);
+      const targetH = Math.floor(readH / 2);
+      const totalScale = origH / targetH;
+      const nuevaRes = (parseFloat(resOriginal) * totalScale).toFixed(6);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      const imgData = ctx.createImageData(targetW, targetH);
+      const data = imgData.data;
+
+      for (let y = 0; y < targetH; y++) {
+        const y0 = y * 2;
+        for (let x = 0; x < targetW; x++) {
+          const x0 = x * 2;
+          const idxs = [
+            y0 * readW + x0,
+            y0 * readW + Math.min(readW - 1, x0 + 1),
+            Math.min(readH - 1, y0 + 1) * readW + x0,
+            Math.min(readH - 1, y0 + 1) * readW + Math.min(readW - 1, x0 + 1)
+          ];
+
+          let bestIdx = idxs[0];
+          let minExG = 9999;
+          for (let k = 0; k < 4; k++) {
+            const i = idxs[k];
+            const r = rBand[i], g = gBand[i], b = bBand[i];
+            const a = aBand ? aBand[i] : ((r > 0 || g > 0 || b > 0) ? 255 : 0);
+            if (a > 200) {
+              const exg = 2 * g - r - b;
+              if (exg < minExG && (r + g + b) > 65) {
+                minExG = exg;
+                bestIdx = i;
+              }
+            }
+          }
+
+          const outIdx = (y * targetW + x) * 4;
+          const r = rBand[bestIdx], g = gBand[bestIdx], b = bBand[bestIdx];
+          data[outIdx] = r;
+          data[outIdx + 1] = g;
+          data[outIdx + 2] = b;
+          data[outIdx + 3] = aBand ? aBand[bestIdx] : ((r > 0 || g > 0 || b > 0) ? 255 : 0);
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      return { blob: blob, filename: "ortomosaico_optimizado.png", resAjustada: nuevaRes };
+    }
+
+    async function procesarConRender() {
+      const fileInput = document.getElementById("file-input");
+      const apiUrl = document.getElementById("api-url").value.trim();
+      const baseUrl = apiUrl.replace(/\/analyze\/?$/, "");
+      const resVal = document.getElementById("input-res").value;
+      const statusBar = document.getElementById("status-bar");
+      const btnAnalyze = document.getElementById("btn-analyze");
+
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert("Seleccione primero un archivo GeoTIFF (.tif), JPG o PNG para enviarlo al motor Python.");
+        return;
+      }
+
+      try {
+        statusBar.classList.remove("hidden");
+        btnAnalyze.disabled = true;
+        btnAnalyze.classList.add("opacity-60");
+
+        const originalFile = fileInput.files[0];
+        const preparado = await prepararArchivoParaRender(originalFile, resVal, statusBar);
+
+        statusBar.textContent = "Conectando con el motor Python en Render...";
+        await fetch(baseUrl, { method: "GET" });
+
+        statusBar.textContent = "Ejecutando extracción geomorfológica (15 variables hidromorfológicas, barras, islas y dosel)...";
+        const formData = new FormData();
+        formData.append("file", preparado.blob, preparado.filename);
+        formData.append("default_res", preparado.resAjustada);
+
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || `Error HTTP ${response.status}`);
+        }
+
+        data.res_m_px = parseFloat(resVal);
+        renderizarDatos(data);
+        statusBar.textContent = "Análisis de las 15 variables completado exitosamente.";
+        setTimeout(() => statusBar.classList.add("hidden"), 5000);
+      } catch (err) {
+        statusBar.textContent = "Error al procesar con Render: " + err.message;
+      } finally {
+        btnAnalyze.disabled = false;
+        btnAnalyze.classList.remove("opacity-60");
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      cargarCasoEstudio();
+    });
+  </script>
+</body>
+</html>
