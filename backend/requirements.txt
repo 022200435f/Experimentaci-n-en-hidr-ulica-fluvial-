@@ -1,1 +1,10 @@
-
+--prefer-binary
+fastapi>=0.115.0
+uvicorn>=0.30.6
+python-multipart>=0.0.9
+numpy>=1.26.4
+opencv-python-headless>=4.10.0.84
+scikit-image>=0.24.0
+scipy>=1.14.1
+rasterio>=1.4.2
+pillow>=10.4.0
